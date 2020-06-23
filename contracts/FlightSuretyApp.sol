@@ -5,7 +5,7 @@ pragma solidity ^0.4.24;
 // More info: https://www.nccgroup.trust/us/about-us/newsroom-and-events/blog/2018/november/smart-contract-insecurity-bad-arithmetic/
 
 import "../node_modules/openzeppelin-solidity/contracts/math/SafeMath.sol";
-
+import "./FlightSuretyData.sol";
 /************************************************** */
 /* FlightSurety Smart Contract                      */
 /************************************************** */
@@ -23,18 +23,23 @@ contract FlightSuretyApp {
     uint8 private constant STATUS_CODE_LATE_WEATHER = 30;
     uint8 private constant STATUS_CODE_LATE_TECHNICAL = 40;
     uint8 private constant STATUS_CODE_LATE_OTHER = 50;
-
+    uint256 private constant CREDIT_MULTIPLIER = 15;
     address private contractOwner;          // Account used to deploy contract
-
+    FlightSuretyData dataContract;
     struct Flight {
         bool isRegistered;
         uint8 statusCode;
         uint256 updatedTimestamp;        
         address airline;
     }
-    mapping(bytes32 => Flight) private flights;
+    //mapping(bytes32 => Flight) private flights;
 
+    event RegisteredAirline(address airlineID);
  
+
+    function() external payable {
+    }
+
     /********************************************************************************************/
     /*                                       FUNCTION MODIFIERS                                 */
     /********************************************************************************************/
@@ -50,7 +55,7 @@ contract FlightSuretyApp {
     modifier requireIsOperational() 
     {
          // Modify to call data contract's status
-        require(true, "Contract is currently not operational");  
+        require(dataContract.isOperational(), "Contract is currently not operational");  
         _;  // All modifiers require an "_" which indicates where the function body will be added
     }
 
@@ -63,6 +68,12 @@ contract FlightSuretyApp {
         _;
     }
 
+modifier requireAirlineSubmittedFunding() {
+        require(
+            dataContract.hasFundingBeenSubmitted(msg.sender),
+            "Requires funding has been submitted by registering airline");
+        _;
+    }
     /********************************************************************************************/
     /*                                       CONSTRUCTOR                                        */
     /********************************************************************************************/
@@ -73,10 +84,12 @@ contract FlightSuretyApp {
     */
     constructor
                                 (
+                                    address _dataContract
                                 ) 
                                 public 
     {
         contractOwner = msg.sender;
+        dataContract = FlightSuretyData(_dataContract);
     }
 
     /********************************************************************************************/
@@ -85,10 +98,9 @@ contract FlightSuretyApp {
 
     function isOperational() 
                             public 
-                            pure 
                             returns(bool) 
     {
-        return true;  // Modify to call data contract's status
+        return dataContract.isOperational(); // Modify to call data contract's status
     }
 
     /********************************************************************************************/
@@ -101,13 +113,39 @@ contract FlightSuretyApp {
     *
     */   
     function registerAirline
-                            (   
+                            (   address airline
                             )
-                            external
-                            pure
-                            returns(bool success, uint256 votes)
+                            public
+                            requireIsOperational
+                            requireAirlineSubmittedFunding
+                            
     {
-        return (success, 0);
+        require(
+            dataContract.hasAirlineBeenAdded(airline),
+            "Requires airline has been added");
+
+        address[] memory registeredAirlines = (
+            dataContract.getRegisteredAirlines());
+            if (registeredAirlines.length < 5) {
+            require(
+                msg.sender == registeredAirlines[0],
+                "Requires first airline to register first 4 airlines");
+            dataContract.addToRegisteredAirlines(airline);
+            emit RegisteredAirline(airline);
+        } else {
+            require(
+                dataContract.hasAirlineBeenRegistered(msg.sender),
+                "Requires registering airline is registered");
+            require(
+                !dataContract.hasAirlineVotedFor(msg.sender, airline),
+                "Requires registering airline hasn't already voted");
+
+            uint votes = dataContract.voteForAirline(msg.sender, airline);
+            if (SafeMath.div(SafeMath.mul(votes, 100), registeredAirlines.length) >= 50) {
+                dataContract.addToRegisteredAirlines(airline);
+                emit RegisteredAirline(airline);
+            }
+        }
     }
 
 
@@ -117,27 +155,47 @@ contract FlightSuretyApp {
     */  
     function registerFlight
                                 (
+                                    address airlineID,
+                                    string flight,
+                                    uint256 timestamp
                                 )
                                 external
-                                pure
+                                requireIsOperational
     {
-
+        dataContract.addToRegisteredFlights(airlineID, flight, timestamp);
     }
     
+    function submitAirlineRegistrationFund(
+    )
+        external
+        payable
+        requireIsOperational
+    {
+        require(
+            !dataContract.hasFundingBeenSubmitted(msg.sender),
+            "Requires funding wasn't already provided");
+        require(
+            msg.value == 10 ether, "Requires registration funds be 10 ether");
+        address(dataContract).transfer(msg.value);
+        dataContract.setFundingSubmitted(msg.sender);
+    }
    /**
     * @dev Called after oracle has updated flight status
     *
     */  
     function processFlightStatus
                                 (
-                                    address airline,
+                                    address airlineID,
                                     string memory flight,
                                     uint256 timestamp,
                                     uint8 statusCode
                                 )
                                 internal
-                                pure
+                                requireIsOperational
     {
+        if (statusCode == STATUS_CODE_LATE_AIRLINE) {
+            dataContract.creditInsurees(airlineID, flight, CREDIT_MULTIPLIER);
+        }
     }
 
 
@@ -162,7 +220,29 @@ contract FlightSuretyApp {
         emit OracleRequest(index, airline, flight, timestamp);
     } 
 
+function buyInsurance(
+        address airlineID,
+        string flight
+    )
+        external
+        payable
+        requireIsOperational
+    {
+        require(
+            msg.value <= 1 ether,
+            "Requires insured amount of less than 1 ether");
+        dataContract.addToInsurancePolicy(
+            airlineID, flight, msg.sender, msg.value);
+        address(dataContract).transfer(msg.value);
+    }
 
+    function withdrawCredits(
+    )
+        external
+        requireIsOperational
+    {
+        dataContract.withdrawCreditsForInsuree(msg.sender);
+    }
 // region ORACLE MANAGEMENT
 
     // Incremented to add pseudo-randomness at various points
