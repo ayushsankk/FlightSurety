@@ -1,6 +1,6 @@
-import DOM from './dom';
-import Contract from './contract';
-import './flightsurety.css';
+import DOM from '../dapp/dom';
+import Contract from '../dapp/contract';
+import '../dapp/flightsurety.css';
 
 
 (async() => {
