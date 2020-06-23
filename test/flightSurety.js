@@ -1,18 +1,32 @@
 
 var Test = require('../config/testConfig.js');
 var BigNumber = require('bignumber.js');
+const Web3 = require('web3');
+
 
 contract('Flight Surety Tests', async (accounts) => {
 
-  var config;
+    let config;
+    let firstAirline;
   before('setup contract', async () => {
     config = await Test.Config(accounts);
+    firstAirline = config.firstAirline;
     await config.flightSuretyData.authorizeCaller(config.flightSuretyApp.address);
   });
 
   /****************************************************************************************/
   /* Operations and Settings                                                              */
   /****************************************************************************************/
+
+  it(`Has correct operational status after set`, async function () {
+    await config.flightSuretyData.setOperatingStatus(false);
+
+    let status = await config.flightSuretyData.isOperational.call();
+    assert.equal(status, false, "Incorrect operating status value after set");
+
+    // Change it back to true so the rest of the tests work
+    await config.flightSuretyData.setOperatingStatus(true);
+  });
 
   it(`(multiparty) has correct initial isOperational() value`, async function () {
 
@@ -35,6 +49,20 @@ contract('Flight Surety Tests', async (accounts) => {
       }
       assert.equal(accessDenied, true, "Access not restricted to Contract Owner");
             
+  });
+
+  it(`First airline is registered when contract is deployed`, async function () {
+    let wasRegistered = (
+      await config.flightSuretyData.hasAirlineBeenRegistered.call(
+        firstAirline));
+    assert.equal(
+      wasRegistered, true, "First airline not registered on deploy");
+
+    let wasFunded = (
+      await config.flightSuretyData.hasFundingBeenSubmitted.call(
+        firstAirline));
+    assert.equal(
+      wasFunded, true, "First airline should be funded on deploy");
   });
 
   it(`(multiparty) can allow access to setOperatingStatus() for Contract Owner account`, async function () {
@@ -90,5 +118,7 @@ contract('Flight Surety Tests', async (accounts) => {
 
   });
  
+  
+
 
 });
